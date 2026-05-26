@@ -1,92 +1,64 @@
-#include <Arduino.h>
-#include <Wire.h>
-#include <Adafruit_BMP280.h>
-#include <Adafruit_AHTX0.h>
+/*************************************************** 
+  This is an example for the LTR390 UV Sensor
 
-#define SDA_PIN 3
-#define SCL_PIN 4
+  Designed specifically to work with the LTR390 UV sensor from Adafruit
+  ----> https://www.adafruit.com
 
-Adafruit_BMP280 bmp;
-Adafruit_AHTX0 aht;
+  These sensors use I2C to communicate, 2 pins are required to  
+  interface
+ ****************************************************/
+ 
+#include "Adafruit_LTR390.h"
 
-uint8_t bmpAddress = 0;
+Adafruit_LTR390 ltr = Adafruit_LTR390();
 
 void setup() {
   Serial.begin(115200);
-  delay(2000);
+  Serial.println("Adafruit LTR-390 test");
 
-  Serial.println("Starting sensors...");
-
-  Wire.begin(SDA_PIN, SCL_PIN);
-
-  // Detect BMP280
-  Wire.beginTransmission(0x76);
-  if (Wire.endTransmission() == 0) {
-    bmpAddress = 0x76;
+  if ( ! ltr.begin() ) {
+    Serial.println("Couldn't find LTR sensor!");
+    while (1) delay(10);
   }
+  Serial.println("Found LTR sensor!");
 
-  Wire.beginTransmission(0x77);
-  if (Wire.endTransmission() == 0) {
-    bmpAddress = 0x77;
-  }
-
-  if (bmpAddress != 0) {
-    if (bmp.begin(bmpAddress)) {
-      Serial.print("BMP280 found at 0x");
-      Serial.println(bmpAddress, HEX);
-    } else {
-      Serial.println("BMP280 init failed");
-    }
+  ltr.setMode(LTR390_MODE_UVS);
+  if (ltr.getMode() == LTR390_MODE_ALS) {
+    Serial.println("In ALS mode");
   } else {
-    Serial.println("BMP280 not detected");
+    Serial.println("In UVS mode");
   }
 
-  // Start AHT20
-  if (aht.begin()) {
-    Serial.println("AHT20 found");
-  } else {
-    Serial.println("AHT20 not found");
+  ltr.setGain(LTR390_GAIN_3);
+  Serial.print("Gain : ");
+  switch (ltr.getGain()) {
+    case LTR390_GAIN_1: Serial.println(1); break;
+    case LTR390_GAIN_3: Serial.println(3); break;
+    case LTR390_GAIN_6: Serial.println(6); break;
+    case LTR390_GAIN_9: Serial.println(9); break;
+    case LTR390_GAIN_18: Serial.println(18); break;
   }
 
-  Serial.println("Setup complete");
+  ltr.setResolution(LTR390_RESOLUTION_16BIT);
+  Serial.print("Resolution : ");
+  switch (ltr.getResolution()) {
+    case LTR390_RESOLUTION_13BIT: Serial.println(13); break;
+    case LTR390_RESOLUTION_16BIT: Serial.println(16); break;
+    case LTR390_RESOLUTION_17BIT: Serial.println(17); break;
+    case LTR390_RESOLUTION_18BIT: Serial.println(18); break;
+    case LTR390_RESOLUTION_19BIT: Serial.println(19); break;
+    case LTR390_RESOLUTION_20BIT: Serial.println(20); break;
+  }
+
+  ltr.setThresholds(100, 1000);
+  ltr.configInterrupt(true, LTR390_MODE_UVS);
 }
 
 void loop() {
-
-  // BMP280
-  if (bmpAddress != 0) {
-
-    float temp = bmp.readTemperature();
-    float pressure = bmp.readPressure() / 100.0F;
-
-    Serial.println("BMP280:");
-    
-    Serial.print("Temp: ");
-    Serial.print(temp);
-    Serial.println(" C");
-
-    Serial.print("Pressure: ");
-    Serial.print(pressure);
-    Serial.println(" hPa");
+  if (ltr.newDataAvailable()) {
+      Serial.print("UV data: "); 
+      Serial.print(ltr.readUVS());
   }
-
-  // AHT20
-  sensors_event_t humidity;
-  sensors_event_t temp;
-
-  aht.getEvent(&humidity, &temp);
-
-  Serial.println("AHT20:");
-
-  Serial.print("Temp: ");
-  Serial.print(temp.temperature);
-  Serial.println(" C");
-
-  Serial.print("Humidity: ");
-  Serial.print(humidity.relative_humidity);
-  Serial.println(" %");
-
-  Serial.println("-------------------");
-
-  delay(3000);
+  
+  delay(100);
 }
