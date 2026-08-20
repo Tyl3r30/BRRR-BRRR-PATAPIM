@@ -98,6 +98,15 @@ const float LUX_WINDOW_FACTOR = 0.6F;
 const float LUX_GAIN_DIVISOR  = 3.0F;
 
 // ============================================================
+//  BOUNDARY TEST MODE (temporary - remove before submitting)
+//  When true, sensor values are typed into the Serial Monitor
+//  instead of read from the real sensors, so boundaries can be
+//  tested without needing real extreme conditions.
+//  Format: temp,hum,pres,uvi,lux   e.g.  28,50,1013,6,1000
+// ============================================================
+bool TEST_MODE = false;
+
+// ============================================================
 //  OBJECTS
 // ============================================================
 
@@ -187,6 +196,18 @@ bool isValidReading(float value, float minAllowed, float maxAllowed) {
   if (isnan(value)) return false;
   if (value < minAllowed || value > maxAllowed) return false;
   return true;
+}
+
+// Reads a line of test values typed into the Serial Monitor and
+// writes them into the reference parameters if the line parses
+// correctly. Returns false (and leaves the values unchanged) if
+// nothing new has been typed, or if the line couldn't be read as
+// five comma-separated numbers.
+bool readTestValues(float &t, float &h, float &p, float &u, float &l) {
+  if (!Serial.available()) return false;
+  String line = Serial.readStringUntil('\n');
+  int matched = sscanf(line.c_str(), "%f,%f,%f,%f,%f", &t, &h, &p, &u, &l);
+  return (matched == 5);
 }
 
 // ============================================================
@@ -314,11 +335,15 @@ WeatherInfo getWeather(float temp, float hum, float uvi, float lux) {
   if (temp < COLD_TEMP_C && lux < DARK_LUX)
     return { drawRain,         "Cold & dark,",    "Stay inside!",    ST77XX_BLUE   };
 
-  if (lux < DULL_LUX && temp >= COLD_TEMP_C)
-    return { drawCloud,        "Cloudy & dull,",  "Grab a jacket!",  0xC618        };
-
+  // Catches high humidity even when it's dim (low light). Without
+  // this, a humid but dark/dull room would slip past this check and
+  // get wrongly caught by "Cloudy & dull" below, since that branch
+  // only looks at light and temp, not humidity at all.
   if (hum >= HUMID_PERCENT)
     return { drawDrop,         "Humid & sticky,", "Stay hydrated!",  ST77XX_CYAN   };
+
+  if (lux < DULL_LUX && temp >= COLD_TEMP_C)
+    return { drawCloud,        "Cloudy & dull,",  "Grab a jacket!",  0xC618        };
 
   if (temp < COOL_TEMP_C && lux >= BRIGHT_LUX)
     return { drawSunrise,      "Cool & bright,",  "Wrap up!",        0xFD20        };
@@ -410,6 +435,11 @@ void setup() {
   tft.setCursor(10, 55);
   tft.print("Starting...");
 
+  if (TEST_MODE) {
+    Serial.println("TEST MODE ON - type: temp,hum,pres,uvi,lux");
+    Serial.println("e.g. 28,50,1013,6,1000");
+  }
+
   // Sensors are wired to the board's default I2C pins.
   Wire.begin();
 
@@ -467,12 +497,22 @@ void loop() {
     lastButtonPress = millis();
   }
 
-  // Grab a new reading from every sensor.
-  float temp, hum;
-  readAHT(temp, hum);
-  float pres = readPressure();
-  float uvi  = readUVI();
-  float lux  = readLux();
+  // Grab a new reading from every sensor - either from the real
+  // sensors, or typed in over Serial if TEST_MODE is on.
+  float temp, hum, pres, uvi, lux;
+
+  if (TEST_MODE) {
+    static float testTemp = 20, testHum = 50, testPres = 1013, testUvi = 0, testLux = 300;
+    if (readTestValues(testTemp, testHum, testPres, testUvi, testLux)) {
+      Serial.println("New test values applied.");
+    }
+    temp = testTemp; hum = testHum; pres = testPres; uvi = testUvi; lux = testLux;
+  } else {
+    readAHT(temp, hum);
+    pres = readPressure();
+    uvi  = readUVI();
+    lux  = readLux();
+  }
 
   // Keeps a reading if it's valid, otherwise falls back to the
   // last known good value instead of showing something wrong.
@@ -487,9 +527,13 @@ void loop() {
   if (hardDataMode) displayHardData(temp, hum, pres, uvi, lux);
   else              displayFriendly(temp, hum, pres, uvi, lux);
 
-  // Print the same values out to Serial too, handy for debugging.
-  Serial.printf("Temp: %.1f | Hum: %.1f%% | Pres: %.1f | UVI: %.2f | Lux: %.1f\n",
-                temp, hum, pres, uvi, lux);
+  // Print the same values out to Serial too, handy for debugging - includes
+  // the exact weather state that these values produced, so I can see the
+  // reading and the result from the same loop cycle instead of switching
+  // screens and losing sync.
+  WeatherInfo currentState = getWeather(temp, hum, uvi, lux);
+  Serial.printf("Temp: %.1f | Hum: %.1f%% | Pres: %.1f | UVI: %.2f | Lux: %.1f | State: %s\n",
+                temp, hum, pres, uvi, lux, currentState.line1);
 
   delay(LOOP_DELAY_MS);
 }
